@@ -1,0 +1,24 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-CHG-EAST-01",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-15T00:00:00Z",
+      "open_time": "09:30",
+      "close_time": "21:30",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "payload": {"reason": "冬令营业延长"}
+    },
+    {
+      "id": "SNAP-CHG-SOUTH-01",
+      "store_id": "ST-SOUTH-01",
+      "as_of_ts": "2026-11-15T00:00:00Z",
+      "open_time": "11:00",
+      "close_time": "23:00",
+      "weekday_mask": "0111110",
+      "biz_status": "suspended",
+      "payload": {"reason": "装修暂停"}
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-OK-EAST-02",
+      "store_id": "ST-EAST-02",
+      "as_of_ts": "2026-11-16T00:00:00Z",
+      "open_time": "09:00",
+      "close_time": "22:00",
+      "weekday_mask": "1111110",
+      "biz_status": "open",
+      "payload": {"reason": "纯合法样本"}
+    },
+    {
+      "id": "SNAP-OK-EAST-01",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-16T00:00:00Z",
+      "open_time": "08:30",
+      "close_time": null,
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "payload": {"reason": "可空字段样本：close_time 允许为空"}
+    }
+  ]
+}

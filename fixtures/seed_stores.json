@@ -1,0 +1,70 @@
+{
+  "stores": [
+    {
+      "id": "ST-EAST-01",
+      "name": "东城一店",
+      "region": "东城",
+      "open_time": "09:00",
+      "close_time": "21:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "as_of_ts": "2026-11-01T00:00:00Z",
+      "payload": {"timezone": "Asia/Shanghai"}
+    },
+    {
+      "id": "ST-EAST-02",
+      "name": "东城二店",
+      "region": "东城",
+      "open_time": "10:00",
+      "close_time": "22:00",
+      "weekday_mask": "1111110",
+      "biz_status": "open",
+      "as_of_ts": "2026-11-01T00:00:00Z",
+      "payload": {"timezone": "Asia/Shanghai"}
+    },
+    {
+      "id": "ST-WEST-01",
+      "name": "西市旗舰",
+      "region": "西市",
+      "open_time": "08:30",
+      "close_time": "20:30",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "as_of_ts": "2026-11-01T00:00:00Z",
+      "payload": {"timezone": "Asia/Shanghai"}
+    },
+    {
+      "id": "ST-WEST-02",
+      "name": "西市社区店",
+      "region": "西市",
+      "open_time": "09:30",
+      "close_time": "19:30",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "as_of_ts": "2026-11-01T00:00:00Z",
+      "payload": {"timezone": "Asia/Shanghai"}
+    },
+    {
+      "id": "ST-SOUTH-01",
+      "name": "南湾店",
+      "region": "南湾",
+      "open_time": "11:00",
+      "close_time": "23:00",
+      "weekday_mask": "0111110",
+      "biz_status": "open",
+      "as_of_ts": "2026-11-01T00:00:00Z",
+      "payload": {"timezone": "Asia/Shanghai"}
+    },
+    {
+      "id": "ST-NORTH-01",
+      "name": "北苑店",
+      "region": "北苑",
+      "open_time": "09:00",
+      "close_time": "18:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "as_of_ts": "2026-11-01T00:00:00Z",
+      "payload": {"timezone": "Asia/Shanghai"}
+    }
+  ]
+}

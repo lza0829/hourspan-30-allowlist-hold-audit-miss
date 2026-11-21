@@ -1,0 +1,14 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-HOT-NORTH-01",
+      "store_id": "ST-NORTH-01",
+      "as_of_ts": "2026-11-18T00:00:00Z",
+      "open_time": "09:00",
+      "close_time": "18:30",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "special_note": "供暖季调整（热更新 v2 登记后可入档）"
+    }
+  ]
+}

@@ -1,0 +1,21 @@
+name: hourspan
+
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "11200:11200"
+    volumes:
+      - hourspan_data:/data
+      - ./fixtures:/fixtures:ro
+    environment:
+      DATA_DIR: /data
+      FIXTURES_DIR: /fixtures
+  frontend:
+    build: ./frontend
+    ports:
+      - "6200:80"
+    depends_on:
+      - backend
+volumes:
+  hourspan_data:

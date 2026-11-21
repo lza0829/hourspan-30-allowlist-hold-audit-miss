@@ -1,0 +1,31 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-BAD-WEST-01",
+      "store_id": "ST-WEST-01",
+      "as_of_ts": "2026-11-16T00:00:00Z",
+      "open_time": "08:00",
+      "close_time": "20:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "temp_close_date": "2026-12-01"
+    },
+    {
+      "id": "SNAP-BAD-WEST-02",
+      "store_id": "ST-WEST-02",
+      "as_of_ts": "2026-11-16T00:00:00Z",
+      "open_time": "09:00",
+      "close_time": "19:00",
+      "biz_status": "open"
+    },
+    {
+      "id": "SNAP-BAD-NORTH-01",
+      "store_id": "ST-NORTH-01",
+      "as_of_ts": "2026-11-16T00:00:00Z",
+      "open_time": "09:00",
+      "close_time": "18:00",
+      "weekday_mask": null,
+      "biz_status": "open"
+    }
+  ]
+}
