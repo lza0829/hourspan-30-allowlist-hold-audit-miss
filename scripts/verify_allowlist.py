@@ -7,6 +7,8 @@
   4. 热更新交错：在途批钉旧版，新批按新版；旧 hist row_hash 不回溯漂移
   5. 失败闭路径：无生效允许集 → 闸门关死整批拒收
   6. 核证只读接口：version / 非法字段 / 钉死 hist 版本 / valid；篡改 hash 必被抓
+  7. 命中明细（甲 · 全量枚举）：搁置同事务写明细；两非法字段须全量枚举 + count；
+     明细分叉整笔回滚无孤立；hold-details / hold-audit 只读接口互证。
 
 运行：PYTHONPATH=backend python3 scripts/verify_allowlist.py
 """
@@ -23,6 +25,7 @@ sys.path.insert(0, os.path.join(BASE, "backend"))
 
 from app import seed  # noqa: E402
 from app.db import connect  # noqa: E402
+from app.modules import allowlist_hold_audit as hold_aud  # noqa: E402
 from app.modules import snapshot_field_allowlist as allowlist  # noqa: E402
 from app.services import detect, ingest, scd  # noqa: E402
 
@@ -133,6 +136,83 @@ def main():
               sh is not None and "special_note" in json.loads(sh["illegal_fields_json"]))
     finally:
         conn.close()
+
+    # ---- 3A. 命中明细：全量枚举 + 缺一回滚（甲口径回归，v1 仍生效） -----------
+    r = ingest.run_batch("ingest_contract_two_illegal.json")
+    check("3A.1 双非法整单搁置", r.get("accepted") == 0 and r.get("shelved") == 1,
+          json.dumps(r, ensure_ascii=False))
+    conn = connect()
+    try:
+        row = conn.execute(
+            """SELECT d.* FROM allowlist_hold_details d
+               JOIN allowlist_shelved s ON s.id=d.shelved_id
+               WHERE s.raw_json LIKE '%SNAP-TWO-ILLEGAL-01%'"""
+        ).fetchone()
+        fields = json.loads(row["illegal_fields_json"]) if row else []
+        check("3A.2 明细两条字段名全量枚举",
+              row is not None and set(fields) == {"temp_close_date", "special_note"},
+              f"fields={fields}")
+        check("3A.3 明细 count=2 与钉版 v1",
+              row is not None and row["illegal_count"] == 2 and row["allowlist_version"] == "ALW-v1",
+              f"count={row['illegal_count'] if row else None}")
+        check("3A.4 明细单据键=快照 id",
+              row is not None and row["record_key"] == "SNAP-TWO-ILLEGAL-01")
+
+        # 全库：不存在无明细的孤立搁置单（缺一回滚后的不变量）。
+        n_shelved = conn.execute("SELECT COUNT(*) AS c FROM allowlist_shelved").fetchone()["c"]
+        n_detail = conn.execute("SELECT COUNT(*) AS c FROM allowlist_hold_details").fetchone()["c"]
+        check("3A.5 搁置单与明细 1:1 无孤立", n_shelved == n_detail and n_shelved >= 5,
+              f"shelved={n_shelved} detail={n_detail}")
+
+        # 回滚用例：伪造一份「明细与实拦分叉」的 verdict 直接调 shelve，须抛错且不落任何行。
+        before_s = n_shelved
+        tampered = {
+            "ok": False,
+            "illegal_fields": ["temp_close_date"],
+            "missing_required": [],
+            "null_fields": [],
+        }
+        conn.execute("SAVEPOINT rb")
+        raised = False
+        try:
+            orig_enum = allowlist.enumerated_illegal_fields
+            # 让「按 verdict 枚举」返回与实拦分叉的字段，触发回读对撞失败。
+            allowlist.enumerated_illegal_fields = lambda v: ["only_one_field"]
+            try:
+                allowlist.shelve(
+                    conn,
+                    batch_id="B-FORCE",
+                    version="ALW-v1",
+                    record={"id": "SNAP-FORCE", "store_id": "ST-EAST-01",
+                            "as_of_ts": "2026-11-19T00:00:00Z"},
+                    verdict=tampered,
+                    created_at=seed.now_iso(),
+                )
+            finally:
+                allowlist.enumerated_illegal_fields = orig_enum
+        except allowlist.GateIntegrityError:
+            raised = True
+        conn.execute("ROLLBACK TO rb")
+        conn.execute("RELEASE rb")
+        after_s = conn.execute("SELECT COUNT(*) AS c FROM allowlist_shelved").fetchone()["c"]
+        after_d = conn.execute("SELECT COUNT(*) AS c FROM allowlist_hold_details").fetchone()["c"]
+        check("3A.6 明细分叉整笔回滚无孤立搁置",
+              raised and after_s == before_s and after_d == before_s,
+              f"raised={raised} shelved={after_s} detail={after_d} before={before_s}")
+    finally:
+        conn.close()
+
+    # 核证只读接口：明细与载荷/站规/重演闸互证全绿。
+    hd = hold_aud.audit_hits(connect())
+    check("3A.7 命中核证 valid 且全数核过",
+          hd["valid"] is True and hd["verified_total"] == hd["shelved_total"] and hd["shelved_total"] >= 5,
+          json.dumps(hd["checks"], ensure_ascii=False))
+    hdet = hold_aud.hit_details(connect())
+    two = [d for d in hdet["details"] if d["record_key"] == "SNAP-TWO-ILLEGAL-01"]
+    check("3A.8 hit_details 暴露两条字段+计数",
+          len(two) == 1 and set(two[0]["illegal_fields"]) == {"temp_close_date", "special_note"}
+          and two[0]["illegal_count"] == 2 and two[0]["detail_ready"] is True,
+          json.dumps(two, ensure_ascii=False))
 
     # ---- 4. 热更新交错：在途批钉旧版，新批按新版，旧 hash 不漂移 --------------
     pre_update = hist_state()
@@ -263,6 +343,21 @@ def main():
         check("7.5 重复版本写入被拒", resp.status_code == 400)
         resp = client.get("/api/overview")
         check("7.6 总览带契约搁置计数", "契约搁置" in resp.json() and "允许集版本" in resp.json())
+        resp = client.get("/api/allowlist/hold-details")
+        body = resp.json()
+        check("7.7 GET /api/allowlist/hold-details 明细就绪",
+              resp.status_code == 200
+              and body["enumerated_n"] == body["total_n"]
+              and any(set(d["illegal_fields"]) == {"temp_close_date", "special_note"}
+                      and d["illegal_count"] == 2 for d in body["details"]),
+              json.dumps(body, ensure_ascii=False))
+        resp = client.get("/api/allowlist/hold-audit")
+        check("7.8 GET /api/allowlist/hold-audit valid",
+              resp.status_code == 200 and resp.json()["valid"] is True)
+        resp = client.get("/api/allowlist/shelved")
+        check("7.9 搁置队列带命中明细",
+              resp.status_code == 200
+              and all("illegal_fields" in s and "illegal_count" in s for s in resp.json()))
 
     print()
     if FAILURES:

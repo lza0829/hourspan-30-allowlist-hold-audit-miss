@@ -1,3 +1,5 @@
+import json
+
 from fastapi import APIRouter, Body, HTTPException
 
 from app.db import connect
@@ -200,13 +202,28 @@ def allowlist_register(body: dict = Body(...)):
 
 @router.get("/allowlist/shelved")
 def allowlist_shelved():
-    """搁置队列：整单搁置记录（钉 allowlist_version + 非法字段）。"""
+    """搁置队列：整单搁置记录（钉 allowlist_version + 非法字段）+ 同事务命中明细。"""
     conn = connect()
     try:
         rows = conn.execute(
-            "SELECT * FROM allowlist_shelved ORDER BY id DESC LIMIT 200"
+            """SELECT s.*, d.record_key, d.illegal_fields_json AS detail_fields_json,
+                      d.illegal_count, d.allowlist_version AS detail_version,
+                      d.created_at AS detail_at,
+                      (d.id IS NOT NULL) AS detail_ready
+               FROM allowlist_shelved s
+               LEFT JOIN allowlist_hold_details d ON d.shelved_id = s.id
+               ORDER BY s.id DESC LIMIT 200"""
         ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            ready = bool(d.pop("detail_ready"))
+            raw_fields = d.pop("detail_fields_json")
+            d["illegal_fields"] = json.loads(raw_fields) if ready else []
+            d["illegal_count"] = d["illegal_count"] if ready else 0
+            d["detail_ready"] = ready
+            out.append(d)
+        return out
     finally:
         conn.close()
 
@@ -230,9 +247,20 @@ from app.modules import allowlist_hold_audit as hold_aud
 
 @router.get("/allowlist/hold-details")
 def allowlist_hold_details():
+    """契约搁置命中明细（只读）：单据键 / 全量非法字段 / 计数 / 钉版 / 时刻。"""
     conn = connect()
     try:
         return hold_aud.hit_details(conn)
+    finally:
+        conn.close()
+
+
+@router.get("/allowlist/hold-audit")
+def allowlist_hold_audit():
+    """契约搁置命中核证（只读·基线所无）：明细与载荷/站规/重演闸互证。"""
+    conn = connect()
+    try:
+        return hold_aud.audit_hits(conn)
     finally:
         conn.close()
 

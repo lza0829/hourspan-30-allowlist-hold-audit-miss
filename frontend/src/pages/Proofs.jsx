@@ -4,13 +4,24 @@ import { api } from "../api.js";
 export default function Proofs() {
   const [rows, setRows] = useState([]);
   const [companion, setCompanion] = useState(null);
+  const [holdAudit, setHoldAudit] = useState(null);
   const [audit, setAudit] = useState(null);
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
 
   const reload = () =>
-    Promise.all([api("/api/proofs"), api("/api/allowlist/audit")])
-      .then(([p, a]) => { setRows(p); setAudit(a); })
+    Promise.all([
+      api("/api/proofs"),
+      api("/api/allowlist/audit"),
+      api("/api/allowlist/hold-details"),
+      api("/api/allowlist/hold-audit"),
+    ])
+      .then(([p, a, hd, ha]) => {
+        setRows(p);
+        setAudit(a);
+        setCompanion(hd);
+        setHoldAudit(ha);
+      })
       .catch((e) => setErr(String(e.message || e)));
 
   useEffect(() => { reload(); }, []);
@@ -114,8 +125,60 @@ export default function Proofs() {
       )}
       
       <div className="panel">
-        <h2>契约搁置命中明细</h2>
-        <pre className="msg">{companion ? JSON.stringify(companion, null, 2) : "（空）"}</pre>
+        <h2>
+          契约搁置命中明细（甲 · 全量枚举）{" "}
+          {holdAudit && (
+            <span className={`badge ${holdAudit.valid ? "ok" : "bad"}`}>
+              {holdAudit.valid ? "valid" : "invalid"}
+            </span>
+          )}
+        </h2>
+        {holdAudit && (
+          <p className="muted">
+            {holdAudit.verdict_standard} · 已核 {holdAudit.verified_total}/{holdAudit.shelved_total} 单
+          </p>
+        )}
+        <table>
+          <thead>
+            <tr><th>搁置单</th><th>单据键</th><th>非法字段（全量）</th><th>计数</th><th>钉版</th><th>时刻</th></tr>
+          </thead>
+          <tbody>
+            {(companion?.details || []).map((d) => (
+              <tr key={d.shelved_id}>
+                <td>{d.shelved_id}</td>
+                <td className="mono">{d.record_key || "—"}</td>
+                <td className="mono">{(d.illegal_fields || []).join(", ") || "—"}</td>
+                <td>{d.illegal_count}</td>
+                <td className="mono">{d.allowlist_version}</td>
+                <td>{d.created_at}</td>
+              </tr>
+            ))}
+            {!companion?.details?.length && (
+              <tr><td colSpan={6} className="muted">暂无命中明细</td></tr>
+            )}
+          </tbody>
+        </table>
+        {holdAudit && (
+          <table>
+            <thead><tr><th>检查</th><th>结论</th><th>扫描</th><th>明细</th></tr></thead>
+            <tbody>
+              {holdAudit.checks.map((c) => (
+                <tr key={c.check}>
+                  <td className="mono">{c.check}</td>
+                  <td>
+                    <span className={`badge ${c.valid ? "ok" : "bad"}`}>
+                      {c.valid ? "通过" : "失败"}
+                    </span>
+                  </td>
+                  <td>{c.scanned ?? "—"}</td>
+                  <td className="mono">
+                    {c.violations && c.violations.length ? JSON.stringify(c.violations) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
       <div className="panel">
         <h2>scd_proofs</h2>

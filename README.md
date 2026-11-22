@@ -31,8 +31,10 @@ npm run dev
 
 - 开批即钉版：热更新与在途入档交错时，在途批（含已开 hist）仍钉旧版
 - 新开 hist 钉死所用版本；hash 一次算定即固化，改集绝不回溯改写旧 hist 的 row_hash
-- 接口：`GET/POST /api/allowlist/versions`（站规版本读/写·热更新）、`GET /api/allowlist/shelved`（搁置队列）、
-  `GET /api/allowlist/audit`（核证只读：version / 非法字段 / 钉死 hist 版本 / valid）
+- **命中明细（甲 · 全量枚举）**：搁置成功当刻与搁置单**同事务**写下单据键 + `illegal_fields`（未登记 ∪ 缺必填 ∪ 违可空 的全量并集）+ `allowlist_version` + 时刻；明细分叉/缺失整笔回滚，绝不「搁置成功而无明细」
+- 接口：`GET/POST /api/allowlist/versions`（站规版本读/写·热更新）、`GET /api/allowlist/shelved`（搁置队列·含命中明细）、
+  `GET /api/allowlist/audit`（核证只读：version / 非法字段 / 钉死 hist 版本 / valid）、
+  `GET /api/allowlist/hold-details`（命中明细只读）、`GET /api/allowlist/hold-audit`（命中核证只读：明细↔载荷↔站规↔重演闸互证）
 - 核证脚本：`PYTHONPATH=backend python3 scripts/verify_allowlist.py`
-  （纯合法通过 / 纯非法搁置 / 混单无 hist / 热更新零漂移 / 失败闭 / 篡改必抓，37 项全绿）
+  （纯合法通过 / 纯非法搁置 / 混单无 hist / 热更新零漂移 / 失败闭 / 篡改必抓 / 命中明细全量枚举与回滚，47 项全绿）
 

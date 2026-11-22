@@ -9,6 +9,7 @@
 - 站规版本写入：register_version 热更新（只写版本登记册，绝不回溯改写旧 hist 的 row_hash）
 - 入档契约闸：gate_record（未登记字段 / 缺必填 / 违可空规则 → 非法）
 - 搁置队列：allowlist_shelved（钉版本 + 非法字段 + 原始记录）
+- 命中明细：allowlist_hold_details（与搁置单 1:1；单据键 + 全量非法字段 + 世代 + 时刻，同事务写、缺一回滚）
 - 历史维开段钉版：ingest/scd 把开批钉死的版本写进 source_snapshots / hist / 当前镜
 - hash 固化：compute_row_hash 按钉死版本的 dim_fields 算定一次，改集不回溯重算
 - 核证只读接口：audit（version / 非法字段 / 钉死 hist 版本 / valid）
@@ -21,6 +22,11 @@ from datetime import datetime, timezone
 ARCHITECTURE = "甲 · 整单契约（任一非法字段 → 整单搁置，不开 hist）"
 
 V1_VERSION = "ALW-v1"
+
+
+class GateIntegrityError(RuntimeError):
+    """搁置与命中明细分叉 / 缺失。抛出后调用方不 commit，整笔回滚（甲 · 同事务）。
+    绝不允许「搁置成功而无明细」或「明细字段/版本与实拦/站规分叉」。"""
 
 # 物理维列：允许集只能在这几列内声明 dim 字段（dim_fields ⊆ KNOWN_DIM_COLUMNS）；
 # envelope 字段可自由热登记（贴源信封/扩展位，不进维、不参与 row_hash）。
@@ -62,6 +68,19 @@ CREATE TABLE IF NOT EXISTS allowlist_shelved (
   missing_fields_json TEXT NOT NULL DEFAULT '[]',
   null_fields_json TEXT NOT NULL DEFAULT '[]',
   raw_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+-- 命中明细：与搁置单 1:1。搁置成功当刻同事务写下——单据键 + 全量非法字段 +
+-- 当时允许集世代 + 时刻。缺此明细即不允许存在孤立搁置单（缺一回滚）。
+CREATE TABLE IF NOT EXISTS allowlist_hold_details (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  shelved_id INTEGER NOT NULL UNIQUE REFERENCES allowlist_shelved(id) ON DELETE CASCADE,
+  batch_id TEXT,
+  record_key TEXT NOT NULL,
+  illegal_fields_json TEXT NOT NULL,
+  illegal_count INTEGER NOT NULL,
+  allowlist_version TEXT NOT NULL,
   created_at TEXT NOT NULL
 );
 """
@@ -241,9 +260,41 @@ def compute_row_hash(definition, record) -> str:
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
+def enumerated_illegal_fields(verdict) -> list:
+    """甲 · 全量枚举：未登记 ∪ 缺必填 ∪ 违可空的字段名并集（去重有序）。
+    明细的 illegal_fields 必须与此逐字一致——缺一则核证失败。"""
+    merged = (
+        set(verdict.get("illegal_fields") or [])
+        | set(verdict.get("missing_required") or [])
+        | set(verdict.get("null_fields") or [])
+    )
+    return sorted(merged)
+
+
+def record_key_of(record) -> str:
+    """单据键：优先快照 id，缺省退化为「门店@时刻」。"""
+    if isinstance(record, dict):
+        rid = record.get("id")
+        if rid:
+            return str(rid)
+        store = record.get("store_id") or "?"
+        as_of = record.get("as_of_ts") or "?"
+        return f"{store}@{as_of}"
+    return "<record_not_object>"
+
+
 def shelve(conn, *, batch_id, version, record, verdict, created_at):
-    """整单进搁置队列（甲）：钉 allowlist_version + 非法字段 + 原始记录。"""
-    conn.execute(
+    """整单进搁置队列（甲）：搁置单 + 命中明细**同事务**写入。
+
+    搁置单如实钉 allowlist_version + 非法/缺必填/违可空三数组 + 原始记录；
+    随后按 verdict 全量枚举写明细（单据键 / illegal_fields / illegal_count /
+    allowlist_version / created_at），并回读对撞。任一步不一致 → 抛
+    GateIntegrityError，调用方不 commit 即整笔回滚，绝不落孤立搁置单。
+    """
+    illegal = list(verdict.get("illegal_fields") or [])
+    missing = list(verdict.get("missing_required") or [])
+    nulls = list(verdict.get("null_fields") or [])
+    cur = conn.execute(
         """INSERT INTO allowlist_shelved(
              batch_id, allowlist_version, store_id, as_of_ts,
              illegal_fields_json, missing_fields_json, null_fields_json,
@@ -254,13 +305,72 @@ def shelve(conn, *, batch_id, version, record, verdict, created_at):
             version,
             record.get("store_id") if isinstance(record, dict) else None,
             record.get("as_of_ts") if isinstance(record, dict) else None,
-            json.dumps([], ensure_ascii=False),
-            json.dumps(verdict["missing_required"], ensure_ascii=False),
-            json.dumps([], ensure_ascii=False),
+            json.dumps(illegal, ensure_ascii=False),
+            json.dumps(missing, ensure_ascii=False),
+            json.dumps(nulls, ensure_ascii=False),
             json.dumps(record, ensure_ascii=False, default=str),
             created_at,
         ),
     )
+    shelved_id = cur.lastrowid
+
+    # 全量枚举明细：并集去重；count 必须等于实拦字段数。
+    detail_fields = enumerated_illegal_fields(verdict)
+    detail = {
+        "shelved_id": shelved_id,
+        "batch_id": batch_id,
+        "record_key": record_key_of(record),
+        "illegal_fields": detail_fields,
+        "illegal_count": len(detail_fields),
+        "allowlist_version": version,
+        "created_at": created_at,
+    }
+    conn.execute(
+        """INSERT INTO allowlist_hold_details(
+             shelved_id, batch_id, record_key, illegal_fields_json,
+             illegal_count, allowlist_version, created_at
+           ) VALUES (?,?,?,?,?,?,?)""",
+        (
+            shelved_id,
+            batch_id,
+            detail["record_key"],
+            json.dumps(detail_fields, ensure_ascii=False),
+            detail["illegal_count"],
+            version,
+            created_at,
+        ),
+    )
+
+    # 同事务回读对撞：明细必须与搁置载荷逐项一致，否则整笔回滚。
+    row = conn.execute(
+        "SELECT * FROM allowlist_hold_details WHERE shelved_id=?", (shelved_id,)
+    ).fetchone()
+    stored_shelved = conn.execute(
+        "SELECT * FROM allowlist_shelved WHERE id=?", (shelved_id,)
+    ).fetchone()
+    if row is None or stored_shelved is None:
+        raise GateIntegrityError("搁置明细缺失：搁置单已写但明细未落（甲 · 缺一回滚）")
+    stored_fields = json.loads(row["illegal_fields_json"])
+    shelved_union = sorted(
+        set(json.loads(stored_shelved["illegal_fields_json"]))
+        | set(json.loads(stored_shelved["missing_fields_json"]))
+        | set(json.loads(stored_shelved["null_fields_json"]))
+    )
+    if stored_fields != shelved_union:
+        raise GateIntegrityError(
+            f"搁置明细与载荷分叉：detail={stored_fields} union={shelved_union}"
+        )
+    if json.loads(row["illegal_fields_json"]) != detail_fields:
+        raise GateIntegrityError("搁置明细字段与实拦分叉（甲 · 全量枚举）")
+    if row["illegal_count"] != len(detail_fields):
+        raise GateIntegrityError("搁置明细 count 与实拦个数不符")
+    if row["allowlist_version"] != version or stored_shelved["allowlist_version"] != version:
+        raise GateIntegrityError("搁置明细版本与钉死站规分叉")
+    if row["record_key"] != detail["record_key"]:
+        raise GateIntegrityError("搁置明细单据键分叉")
+    if row["created_at"] != created_at or stored_shelved["created_at"] != created_at:
+        raise GateIntegrityError("搁置明细时刻分叉")
+    return detail
 
 
 # ---------------------------------------------------------------- 核证（只读）
@@ -430,19 +540,4 @@ def audit(conn) -> dict:
         ),
         "checks": checks,
         "valid": all(c["valid"] for c in checks),
-    }
-
-
-def hold_hit_details(conn) -> dict:
-    rows = conn.execute("SELECT * FROM allowlist_shelved ORDER BY id").fetchall()
-    return {
-        "details": [
-            {
-                "id": r["id"],
-                "illegal_fields": [],
-                "allowlist_version": r["allowlist_version"],
-                "detail_ready": False,
-            }
-            for r in rows
-        ]
     }

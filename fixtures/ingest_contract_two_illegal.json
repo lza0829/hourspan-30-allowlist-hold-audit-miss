@@ -1,0 +1,15 @@
+{
+  "snapshots": [
+    {
+      "id": "SNAP-TWO-ILLEGAL-01",
+      "store_id": "ST-EAST-01",
+      "as_of_ts": "2026-11-19T00:00:00Z",
+      "open_time": "09:00",
+      "close_time": "21:00",
+      "weekday_mask": "1111100",
+      "biz_status": "open",
+      "temp_close_date": "2026-12-25",
+      "special_note": "双非法字段样本（v1 下 temp_close_date + special_note 皆未登记 → 甲 · 全量枚举须两条字段名）"
+    }
+  ]
+}

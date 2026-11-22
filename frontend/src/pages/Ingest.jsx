@@ -64,7 +64,7 @@ export default function Ingest() {
         <table>
           <thead>
             <tr>
-              <th>id</th><th>批号</th><th>钉版</th><th>门店</th><th>未登记字段</th><th>缺必填</th><th>违可空</th><th>时间</th>
+              <th>id</th><th>批号</th><th>钉版</th><th>门店</th><th>未登记字段</th><th>缺必填</th><th>违可空</th><th>命中明细（全量）</th><th>时间</th>
             </tr>
           </thead>
           <tbody>
@@ -72,15 +72,27 @@ export default function Ingest() {
               <tr key={s.id}>
                 <td>{s.id}</td>
                 <td className="mono">{s.batch_id}</td>
-                <td className="mono">{s.allowlist_version}</td>
+                <td className="mono">{s.detail_version || s.allowlist_version}</td>
                 <td>{s.store_id || "—"}</td>
                 <td className="mono">{s.illegal_fields_json}</td>
                 <td className="mono">{s.missing_fields_json}</td>
                 <td className="mono">{s.null_fields_json}</td>
-                <td>{s.created_at}</td>
+                <td className="mono">
+                  {s.detail_ready ? (
+                    <>
+                      <span className={`badge ${s.illegal_count ? "bad" : ""}`}>
+                        {s.illegal_count} 项
+                      </span>{" "}
+                      {(s.illegal_fields || []).join(", ") || "—"}
+                    </>
+                  ) : (
+                    <span className="badge bad">缺明细</span>
+                  )}
+                </td>
+                <td>{s.detail_at || s.created_at}</td>
               </tr>
             ))}
-            {!shelved.length && <tr><td colSpan={8} className="muted">暂无搁置记录</td></tr>}
+            {!shelved.length && <tr><td colSpan={9} className="muted">暂无搁置记录</td></tr>}
           </tbody>
         </table>
       </div>

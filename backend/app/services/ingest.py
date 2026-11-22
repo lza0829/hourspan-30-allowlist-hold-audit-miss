@@ -39,7 +39,7 @@ def ingest_record(conn, ctx, snap):
     ctx["total"] += 1
     verdict = allowlist.gate_record(ctx["definition"], snap)
     if not verdict["ok"]:
-        allowlist.shelve(
+        detail = allowlist.shelve(
             conn,
             batch_id=ctx["batch_id"],
             version=ctx["allowlist_version"],
@@ -48,13 +48,6 @@ def ingest_record(conn, ctx, snap):
             created_at=now_iso(),
         )
         ctx["shelved"] += 1
-        detail = {
-            "snapshot": snap.get("id") if isinstance(snap, dict) else None,
-            "store_id": snap.get("store_id") if isinstance(snap, dict) else None,
-            "illegal_fields": verdict["illegal_fields"],
-            "missing_required": verdict["missing_required"],
-            "null_fields": verdict["null_fields"],
-        }
         ctx["shelved_detail"].append(detail)
         return {"status": "shelved", **detail}
 
